@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common/interfaces';
 import { Logger } from '@nestjs/common/services/logger.service';
 import { loadPackage } from '@nestjs/common/utils/load-package.util';
+import { clc } from '@nestjs/common/utils/cli-colors.util';
 import {
   addLeadingSlash,
   isFunction,
@@ -301,42 +302,82 @@ export class NestApplication
 
     const httpAdapterHost = this.container.getHttpAdapterHostRef();
     return new Promise((resolve, reject) => {
-      const errorHandler = (e: any) => {
-        this.logger.error(e?.toString?.());
-        reject(e);
-      };
-      this.httpServer.once('error', errorHandler);
+      const isAutoListenEnabled = this.isAutoListenEnabled();
 
-      const isCallbackInOriginalArgs = isFunction(args[args.length - 1]);
-      const listenFnArgs = isCallbackInOriginalArgs
-        ? args.slice(0, args.length - 1)
-        : args;
+      const attemptListen = (
+        currentPort: number | string,
+        ...listenArgs: any[]
+      ) => {
+        const errorHandler = (e: any) => {
+          if (isAutoListenEnabled && e?.code === 'EADDRINUSE') {
+            const numericPort =
+              typeof currentPort === 'number'
+                ? currentPort
+                : Number(currentPort);
+            const nextPort = numericPort + 1;
 
-      this.httpAdapter.listen(
-        port,
-        ...listenFnArgs,
-        (...originalCallbackArgs: unknown[]) => {
-          if (this.appOptions?.autoFlushLogs ?? true) {
-            this.flushLogs();
-          }
-          if (originalCallbackArgs[0] instanceof Error) {
-            return reject(originalCallbackArgs[0]);
-          }
+            this.logger.log(
+              `Port ${clc.yellow(String(currentPort))} is in use, trying ${clc.yellow(String(nextPort))} instead.`,
+            );
 
-          const address = this.httpServer.address();
-          if (address) {
             this.httpServer.removeListener('error', errorHandler);
-            this.isListening = true;
 
-            httpAdapterHost.listening = true;
-            resolve(this.httpServer);
+            attemptListen(nextPort, ...listenArgs);
+            return;
           }
-          if (isCallbackInOriginalArgs) {
-            args[args.length - 1](...originalCallbackArgs);
-          }
-        },
-      );
+
+          this.logger.error(e?.toString?.());
+          reject(e);
+        };
+
+        this.httpServer.once('error', errorHandler);
+
+        const isCallbackInOriginalArgs = isFunction(
+          listenArgs[listenArgs.length - 1],
+        );
+        const listenFnArgs = isCallbackInOriginalArgs
+          ? listenArgs.slice(0, listenArgs.length - 1)
+          : listenArgs;
+
+        this.httpAdapter.listen(
+          currentPort,
+          ...listenFnArgs,
+          (...originalCallbackArgs: unknown[]) => {
+            if (this.appOptions?.autoFlushLogs ?? true) {
+              this.flushLogs();
+            }
+            if (originalCallbackArgs[0] instanceof Error) {
+              return reject(originalCallbackArgs[0]);
+            }
+
+            const address = this.httpServer.address();
+            if (address) {
+              this.httpServer.removeListener('error', errorHandler);
+              this.isListening = true;
+
+              httpAdapterHost.listening = true;
+              resolve(this.httpServer);
+            }
+            if (isCallbackInOriginalArgs) {
+              listenArgs[listenArgs.length - 1](...originalCallbackArgs);
+            }
+          },
+        );
+      };
+
+      attemptListen(port, ...args);
     });
+  }
+
+  private isAutoListenEnabled(): boolean {
+    const autoListen = this.appOptions?.autoListen;
+    if (typeof autoListen === 'boolean') {
+      return autoListen;
+    }
+    if (isObject(autoListen)) {
+      return autoListen.enabled === true;
+    }
+    return false;
   }
 
   public async getUrl(): Promise<string> {

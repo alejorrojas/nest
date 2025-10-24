@@ -8,6 +8,17 @@ import { NestApplicationContextOptions } from './nest-application-context-option
 /**
  * @publicApi
  */
+export interface AutoListenOptions {
+  /**
+   * Explicitly enable/disable the auto listen behavior.
+   * Defaults to `false` when the object is provided.
+   */
+  enabled?: boolean;
+}
+
+/**
+ * @publicApi
+ */
 export interface NestApplicationOptions extends NestApplicationContextOptions {
   /**
    * CORS options from [CORS package](https://github.com/expressjs/cors#configuration-options)
@@ -30,4 +41,8 @@ export interface NestApplicationOptions extends NestApplicationContextOptions {
    * keep-alive connections in the HTTP adapter.
    */
   forceCloseConnections?: boolean;
+  /**
+   * Automatically probe for a free TCP port when the requested port is already taken.
+   */
+  autoListen?: boolean | AutoListenOptions;
 }
